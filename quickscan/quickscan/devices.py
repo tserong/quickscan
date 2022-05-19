@@ -3,6 +3,7 @@ import json
 from re import S
 import string
 import shutil
+import asyncio
 import logging
 
 from glob import glob
@@ -10,13 +11,13 @@ from typing import Dict, Any, List, Tuple
 from quickscan.common.utils import (
     get_block_devs,
     get_lvm_metadata,
-    issue_cmd,
     read_file,
     timeit,
     human_readable_size,
     get_link_data,
     is_device_locked,
     parse_tags)
+from quickscan.common.concurrent import concurrent_cmds, async_run
 from quickscan.common.enums import ReportFormat
 
 logger = logging.getLogger(__name__)
@@ -24,11 +25,10 @@ logger = logging.getLogger(__name__)
 # Differences to ceph-volume
 # - don't follow partitions - the presence of partitions makes the device ineligible, anyway
 # - don't try and get an exclusive lock if the device is already rejected
-# - if the device looks empty - inspect the signature with wipefs, to be sure (detects mdraid, btrfs etc)
+# - if the device looks empty - inspect the signature with wipefs, to be sure (detects mdraid, btrfs, gpt etc)
 
 
-class Device:
-    # FIXME - make this a tuple of (src_name, stored_name)
+class BaseDevice:
     _device_attributes = [
         'removable', 
         'size', 
@@ -45,6 +45,14 @@ class Device:
     ]
     _block_dir = '/sys/block'
     _min_osd_size_bytes = 10737418240
+    _report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {model:<25} {dev_nodes:<16}'
+    _report_headings = _report_template.format(
+        dev='Device Path',
+        size='Size',
+        rot='Rotates',
+        model='Model Name',
+        dev_nodes='Device Nodes'
+    )
 
     def __init__(self, parent, dev_node: str) -> None:
         self._parent = parent
@@ -53,56 +61,28 @@ class Device:
         self.alt_path = ''
         self.mpath_device = ''
         self.mpath_node = ''
+        self.dev_nodes = ''
+        self.enclosure_id = ''
+        self.enclosure_slot = ''
         self.sys_api: Dict[str, Any] = {}
         self.lsm_data: Dict[str, Any] = {}
-        self.reject_reasons: List[str] = []
 
         self._holders = glob(os.path.join(self._block_dir, self._dev_node, 'holders/*'))
         self.lvs = self._build_lvs()  # must run after _holders is created
         
+        self._build()
+
+    def _build(self) -> None:
         self._process_sysfs()
-   
-    def analyse(self) -> None:
+        self._detect_mpath()
 
-        # maintain this order, since each step can modify the device object attributes
-        # and be referenced in a later check function
-        self._check_mpath()
-        self._check_size()
-        self._check_partitions()
-        self._check_LVM()
-        self._check_locked()
-
-    def _check_mpath(self) -> None:
+    def _detect_mpath(self) -> None:
         for holder_path in self._holders:
             dev = os.path.basename(holder_path)
             if dev in self._parent._mpath_device_map:
                 self.mpath_device = self._parent._mpath_device_map.get(dev)
                 self.mpath_node = dev
-
-    def _check_size(self) -> None:
-        if self.sys_api['size'] < self._min_osd_size_bytes:
-            self.reject_reasons.append(f'Device too small (< {human_readable_size(self._min_osd_size_bytes)})')
-
-    def _check_partitions(self) -> None:
-        dirs = glob(os.path.join(self._block_dir, self._dev_node, f'{self._dev_node}*'))
-        if dirs:
-            self.reject_reasons.append('Has partitions')
-
-    def _check_LVM(self) -> None:
-        dev_nodes = f'{self._dev_node} {self.mpath_node}'.split(' ')
-        if any(node in self._parent._pv_devices for node in dev_nodes):
-            self.reject_reasons.append('LVM device')
-
-    def _check_locked(self) -> None:
-        if self.reject_reasons:
-            logger.info(f'skipping "lock" check, since {self.dev_path} has already been rejected')
-        elif self.mpath_device:
-            logger.info(f'skipping "lock" check for mpath enabled device')
-        else:
-            # device could be free, let's confirm by trying to get an EXCL lock
-            if is_device_locked(self.dev_path):
-                self.reject_reasons.append('Locked')
-
+   
     def _build_lvs(self) -> List[Dict[str, Any]]:
         lvs = []
         for holder_path in self._holders:
@@ -131,8 +111,9 @@ class Device:
         return self.mpath_device if self.mpath_device else self.dev_path
 
     @property
-    def available(self) -> bool:
-        return False if self.reject_reasons else True
+    def scsi_addr(self) -> str:
+        scsi_addr_path = glob(f'/sys/block/{self._dev_node}/device/bsg/*')
+        return '' if not scsi_addr_path else os.path.basename(scsi_addr_path[0])        
 
     @property
     def device_id(self) -> str:
@@ -140,6 +121,10 @@ class Device:
         model = self.sys_api['model'].strip() or ''
         serial = self.sys_api['serial'].strip() or ''
         return ('_'.join([vendor, model, serial])).replace(' ', '_')
+
+    @property
+    def _dev_nodes_str(self):
+        return (','.join([os.path.basename(self.dev_path), os.path.basename(self.alt_path)])).rstrip(',')
 
     @timeit
     def _process_sysfs(self) -> None:
@@ -178,17 +163,95 @@ class Device:
             and isinstance(getattr(self, k), (float, int, str, list, dict, tuple))
         }
         return json.dumps(data, indent=2, sort_keys=True)
-        
+    
+    def as_text(self) -> str:
+         return self._report_template.format(
+                    dev=self.path,
+                    size=self.sys_api['human_readable_size'],
+                    rot=True if self.sys_api['rotational'] == '1' else False,
+                    model=self.sys_api['model'],
+                    dev_nodes=self._dev_nodes_str
+                )
+
+class Device(BaseDevice):
+    _report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {available!s:<9}  {model:<25} {dev_nodes:<16} {reject}'
+    _report_headings = _report_template.format(
+        dev='Device Path',
+        size='Size',
+        rot='Rotates',
+        available='Available',
+        model='Model Name',
+        dev_nodes='Device Nodes',
+        reject='Reject Reasons'
+    )
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.reject_reasons = []
+
+    @property
+    def available(self):
+        return False if self.reject_reasons else True
+
+    def analyse(self):
+        # Notes
+        # 1. maintain this order, since each step can modify the device object attributes
+        #    and be referenced in a later check function
+        # 2. keep this analysis quick - anything that needs >20ms should be handled in the 
+        #    parent class analyse phase
+        self._check_size()
+        self._check_partitions()
+        self._check_LVM()
+        self._check_locked()
+
+    def _check_size(self) -> None:
+        if self.sys_api['size'] < self._min_osd_size_bytes:
+            self.reject_reasons.append(f'Device too small (< {human_readable_size(self._min_osd_size_bytes)})')
+
+    def _check_partitions(self) -> None:
+        dirs = glob(os.path.join(self._block_dir, self._dev_node, f'{self._dev_node}*'))
+        if dirs:
+            self.reject_reasons.append('Has partitions')
+
+    def _check_LVM(self) -> None:
+        dev_nodes = f'{self._dev_node} {self.mpath_node}'.split(' ')
+        if any(node in self._parent._pv_devices for node in dev_nodes):
+            self.reject_reasons.append('LVM device')
+
+    def _check_locked(self) -> None:
+        if self.reject_reasons:
+            logger.info(f'skipping "lock" check, since {self.dev_path} has already been rejected')
+        elif self.mpath_device:
+            logger.info(f'skipping "lock" check for mpath enabled device')
+        else:
+            # device could be free, let's confirm by trying to get an EXCL lock
+            if is_device_locked(self.dev_path):
+                self.reject_reasons.append('Locked')
+    
+    def as_text(self) -> str:
+        return self._report_template.format(
+                dev=self.path,
+                size=self.sys_api['human_readable_size'],
+                rot=True if self.sys_api['rotational'] == '1' else False,
+                available=self.available,
+                model=self.sys_api['model'],
+                dev_nodes=self._dev_nodes_str,
+                reject=','.join(self.reject_reasons),
+            )
+
 
 class Devices:
 
-    report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {available!s:<9}  {model:<25} {dev_nodes:<16} {reject}'
+    # report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {available!s:<9}  {model:<25} {dev_nodes:<16} {reject}'
+    # basic_report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {model:<25} {dev_nodes:<16}'
     _dependencies = [
         'lvs',
         'wipefs',
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, skip_analysis: bool = True, disk_group_size: int = 10) -> None:
+        self._skip_analysis = skip_analysis
+        self._disk_group_size = disk_group_size
         self._candidate_devices = get_block_devs()
         self._lv_metadata: Dict[str, Dict[str, Any]] = self._build_lv_metadata() 
         self._pv_devices: List[str] = [tgt for _linkname, tgt in get_link_data('/dev/disk/by-id/lvm-pv-uuid-*')]
@@ -196,7 +259,8 @@ class Devices:
         self._lv_device_map = self._build_lv_device_map()
         self._device_data: List[Device] = self._build_devices()
 
-        self._analyse()
+        if not self._skip_analysis:
+            self.analyse()
 
     @classmethod
     def can_run(cls) -> Tuple[bool, List[str]]:
@@ -234,34 +298,51 @@ class Devices:
                 }
         return map
 
-    @timeit
-    def _analyse(self):
+    def analyse(self) -> None:
 
         dev_paths = sorted([dev.path for dev in self._device_data if dev.available])
         if not dev_paths:
-            logger.info('all disks are in use')
+            logger.info('all disks are in use, no further analysis needed')
             return
         
+        self._check_signatures(dev_paths)
+
+    @timeit
+    def _check_signatures(self, dev_paths: List[str]) -> None:
         logger.info(f'inspecting disk signatures for {len(dev_paths)} devices: {dev_paths}')
 
-        # use wipefs to reveal disk signatures for disks that look empty
-        response = issue_cmd(f'wipefs -J --noheadings {" ".join(dev_paths)}')
-        if response.returncode == 0:
-            if response.stdout:
-                js = json.loads(response.stdout.decode('utf-8'))
-                signatures = { sig['device']: sig for sig in js.get('signatures', [])}
+        # Split the disks we need to take a closer look at into groups, then pass to 
+        # asyncio to get the signatures
+        disk_groups = []
+        for i in range(0, len(dev_paths), self._disk_group_size):
+            paths = ' '.join(dev_paths[i:i + self._disk_group_size])
+            disk_groups.append(f'wipefs -J --noheadings {paths}')
+
+        logger.debug(f'starting {len(disk_groups)} concurrent signature checks')
+        data = async_run(concurrent_cmds(disk_groups))
+        logger.debug('finished concurrent command execution')
+
+        for completion in data:
+            if completion.returncode != 0:
+                logger.error(f'wipefs command failed for {" ".join(completion.args)}')
+                continue
+
+            if completion.stdout:
+                js = json.loads(completion.stdout.decode('utf-8'))
+                signatures = {}
+                for sig in js.get('signatures'):
+                    dev_name = sig['device']
+                    if dev_name in signatures:
+                        signatures[dev_name].add(sig['type'])
+                    else:
+                        signatures[dev_name] = {sig['type']}
 
                 for dev in self._device_data:
                     check_name = dev._dev_node if not dev.mpath_device else os.path.basename(dev.mpath_device)
                     if check_name in signatures:
                         logger.info(f'rejecting {check_name}')
-                        dev.reject_reasons.append(f'{signatures[check_name].get("type")} detected')
-            else:
-                logger.info('no signatures found')
-        else:
-            # FIXME
-            logger.error(f'inspect failed RC={response.returncode}: {response.stderr}')
-        
+                        dev.reject_reasons.append(f'{",".join(signatures[check_name])} detected')
+
         logger.info('finished')
 
     @timeit
@@ -269,13 +350,18 @@ class Devices:
         dev_list = []
         dev_map = {}
         for dev_node in self._candidate_devices:
-            dev = Device(self, dev_node)
+            if self._skip_analysis:
+                dev = BaseDevice(self, dev_node)
+            else:
+                dev = Device(self, dev_node)
+
             if dev.device_id in dev_map:
                 existing_device = dev_map[dev.device_id]
                 existing_device.alt_path = f'/dev/{dev_node}'
                 logger.info(f'skipping {dev_node} as a duplicate of {existing_device.dev_path}')
             else:
-                dev.analyse()
+                if not self._skip_analysis:
+                    dev.analyse()
                 dev_map[dev.device_id] = dev
                 dev_list.append(dev)
 
@@ -288,30 +374,17 @@ class Devices:
         return s
     
     def as_text(self) -> str:
-        output = [
-            self.report_template.format(
-                dev='Device Path',
-                size='Size',
-                rot='Rotates',
-                model='Model name',
-                available='Available',
-                dev_nodes='Device Nodes',
-                reject='Reject Reasons'
-            )]
+        if self._skip_analysis:
+            headings = BaseDevice._report_headings
+        else:
+            headings = Device._report_headings
+    
+        output = [headings]
 
         for device in sorted(self._device_data, key=lambda dev: dev.path):
-            device_nodes = ','.join([os.path.basename(device.dev_path), os.path.basename(device.alt_path)])
-            output.append(
-                self.report_template.format(
-                    dev=device.path,
-                    size=device.sys_api['human_readable_size'],
-                    rot=True if device.sys_api['rotational'] == '1' else False,
-                    model=device.sys_api['model'],
-                    available=device.available,
-                    dev_nodes=device_nodes.rstrip(','),
-                    reject=','.join(device.reject_reasons),
-                )
-            )
+            # device_nodes = ','.join([os.path.basename(device.dev_path), os.path.basename(device.alt_path)])
+            output.append(device.as_text())
+
         return '\n'.join(output)
 
     def report(self, mode: ReportFormat='text') -> str:
