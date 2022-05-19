@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 import time
 import argparse
@@ -5,6 +7,7 @@ import argparse
 from quickscan import Devices
 from quickscan.common.enums import ReportFormat,LogLevel
 import logging
+
 
 # set up the logger
 logging.basicConfig(
@@ -23,7 +26,7 @@ def main(args: argparse.Namespace) -> None:
 
     logging.info('Starting...')
     start_time = time.time()
-    devices = Devices()
+    devices = Devices(args.skip_analysis)
     logging.info(f'Completed, runtime: {(time.time() - start_time):.6f}s')
     print(devices.report(mode=args.format.value))
 
@@ -43,6 +46,12 @@ def get_args() -> argparse.Namespace:
         type=LogLevel,
         choices=list(LogLevel),
         help='log level')
+
+    parser.add_argument(
+        '--skip-analysis',
+        default=False,
+        action='store_true',
+        help='flag to skip disk availability checks')
     
     return parser.parse_args()
 
