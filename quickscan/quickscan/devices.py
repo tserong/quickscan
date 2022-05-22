@@ -49,7 +49,7 @@ class BaseDevice:
     _report_headings = _report_template.format(
         dev='Device Path',
         size='Size',
-        rot='Rotates',
+        rot='Type',
         model='Model Name',
         dev_nodes='Device Nodes'
     )
@@ -171,7 +171,7 @@ class BaseDevice:
         return self._report_template.format(
                 dev=self.path,
                 size=self.sys_api['human_readable_size'],
-                rot=True if self.sys_api['rotational'] == '1' else False,
+                rot='HDD' if self.sys_api['rotational'] == '1' else 'Flash',
                 model=self.sys_api['model'],
                 dev_nodes=self._dev_nodes_str
             )
@@ -182,7 +182,7 @@ class Device(BaseDevice):
     _report_headings = _report_template.format(
         dev='Device Path',
         size='Size',
-        rot='Rotates',
+        rot='Type',
         available='Available',
         model='Model Name',
         dev_nodes='Device Nodes',
@@ -237,7 +237,7 @@ class Device(BaseDevice):
         return self._report_template.format(
                 dev=self.path,
                 size=self.sys_api['human_readable_size'],
-                rot=True if self.sys_api['rotational'] == '1' else False,
+                rot='HDD' if self.sys_api['rotational'] == '1' else 'Flash',
                 available=self.available,
                 model=self.sys_api['model'],
                 dev_nodes=self._dev_nodes_str,
