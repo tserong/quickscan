@@ -14,7 +14,8 @@ from quickscan.common.utils import (
     human_readable_size,
     get_link_data,
     is_device_locked,
-    parse_tags)
+    parse_tags,
+    issue_cmd)
 from quickscan.common.filter import ObjectFilter
 from quickscan.common.concurrent import concurrent_cmds, async_run
 from quickscan.common.enums import ReportFormat
@@ -271,8 +272,10 @@ class Devices:
             import lsm  # noqa: F401
         except ImportError:
             self.lsm_available = False
+            logger.info('libstoragemgmt integration is NOT available')
         else:
             self.lsm_available = True
+            logger.info('libstoragemgmt integration is available')
 
         if not self._skip_analysis:
             self.analyse()
@@ -335,9 +338,10 @@ class Devices:
             disk_groups.append(f'wipefs -J --noheadings {paths}')
 
         logger.debug(f'starting {len(disk_groups)} concurrent signature checks')
-        data = async_run(concurrent_cmds(disk_groups))
+        data = async_run(concurrent_cmds(issue_cmd, disk_groups))
         logger.debug('finished concurrent command execution')
-
+        logger.debug(data)
+        logger.info('processing disk signature output')
         for completion in data:
             if completion.returncode != 0:
                 logger.error(f'wipefs command failed for {" ".join(completion.args)}')

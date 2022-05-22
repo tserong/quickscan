@@ -1,8 +1,7 @@
 import asyncio
 
 from subprocess import CompletedProcess
-from .utils import issue_cmd
-from typing import List
+from typing import List, Callable
 import logging
 
 
@@ -25,16 +24,16 @@ except ImportError:
                 loop.close()
 
 
-async def run_cmd(cmd: str) -> CompletedProcess:
-    logger.debug(f'running command {cmd}')
-    response = issue_cmd(cmd)
+async def run_func(func: Callable, cmd: str) -> CompletedProcess:
+    logger.debug(f'running function {func.__name__}, with parms: {cmd}')
+    response = func(cmd)
     return response
 
 
-async def concurrent_cmds(cmd_list: List[str]) -> List[CompletedProcess]:
+async def concurrent_cmds(func: Callable, cmd_list: List[str]) -> List[CompletedProcess]:
     tasks = []
     for cmd in cmd_list:
-        tasks.append(run_cmd(cmd))
+        tasks.append(run_func(func, cmd))
 
     data = await asyncio.gather(*tasks)
 
