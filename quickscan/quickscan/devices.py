@@ -7,7 +7,7 @@ import asyncio
 import logging
 
 from glob import glob
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from quickscan.common.utils import (
     get_block_devs,
     get_lvm_metadata,
@@ -17,6 +17,7 @@ from quickscan.common.utils import (
     get_link_data,
     is_device_locked,
     parse_tags)
+from quickscan.common.filter import Filter
 from quickscan.common.concurrent import concurrent_cmds, async_run
 from quickscan.common.enums import ReportFormat
 
@@ -299,16 +300,16 @@ class Devices:
         return map
 
     def analyse(self) -> None:
+        
+        self._check_signatures()
 
+    @timeit
+    def _check_signatures(self) -> None:
         dev_paths = sorted([dev.path for dev in self._device_data if dev.available])
         if not dev_paths:
             logger.info('all disks are in use, no further analysis needed')
             return
         
-        self._check_signatures(dev_paths)
-
-    @timeit
-    def _check_signatures(self, dev_paths: List[str]) -> None:
         logger.info(f'inspecting disk signatures for {len(dev_paths)} devices: {dev_paths}')
 
         # Split the disks we need to take a closer look at into groups, then pass to 
@@ -367,13 +368,15 @@ class Devices:
 
         return dev_list
 
-    def as_json(self) -> str:
+    def as_json(self, filter: Optional[Filter] = None) -> str:
         s = ''
         for dev in self._device_data:
-            s += dev.as_json()
-        return s
-    
-    def as_text(self) -> str:
+            if filter and not filter.ok(dev):
+                continue
+            s += f'{dev.as_json()},\n'
+        return f'[{s}]' if s else '[]'
+        
+    def as_text(self, filter:Optional[Filter] = None) -> str:
         if self._skip_analysis:
             headings = BaseDevice._report_headings
         else:
@@ -381,13 +384,22 @@ class Devices:
     
         output = [headings]
 
-        for device in sorted(self._device_data, key=lambda dev: dev.path):
-            # device_nodes = ','.join([os.path.basename(device.dev_path), os.path.basename(device.alt_path)])
-            output.append(device.as_text())
+        for dev in sorted(self._device_data, key=lambda dev: dev.path):
+            if filter and not filter.ok(dev):
+                continue
+                # device_nodes = ','.join([os.path.basename(device.dev_path), os.path.basename(device.alt_path)])
+            output.append(dev.as_text())
+
+        if len(output) == 1:
+            sfx = ' that match your filter' if filter else ''
+            return f'No devices found{sfx}'
+        else:
+            dev_count = len(output) - 1
+            output.append(f'{dev_count} devices listed')
 
         return '\n'.join(output)
 
-    def report(self, mode: ReportFormat='text') -> str:
+    def report(self, mode: ReportFormat='text', filter: Optional[Filter] = None) -> str:
         if mode == 'json':
-            return self.as_json()
-        return self.as_text()
+            return self.as_json(filter)
+        return self.as_text(filter)

@@ -6,6 +6,7 @@ import argparse
 
 from quickscan import Devices
 from quickscan.common.enums import ReportFormat,LogLevel
+from quickscan.common.filter import Filter
 import logging
 
 
@@ -24,11 +25,18 @@ def main(args: argparse.Namespace) -> None:
         print('\n'.join(reasons))
         sys.exit(4)
 
+    filter = None
+    if args.filter:
+        filter = Filter(args.filter)
+        if not filter.valid:
+            logger.error(f'invalid filter provided, ignored')
+            filter = None
+
     logging.info('Starting...')
     start_time = time.time()
     devices = Devices(args.skip_analysis)
     logging.info(f'Completed, runtime: {(time.time() - start_time):.6f}s')
-    print(devices.report(mode=args.format.value))
+    print(devices.report(mode=args.format.value, filter=filter))
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -52,6 +60,11 @@ def get_args() -> argparse.Namespace:
         default=False,
         action='store_true',
         help='flag to skip disk availability checks')
+
+    parser.add_argument(
+        '--filter',
+        type=str,
+        help='filter the devices shown by key/value (e.g. key=value,key=value,...)')        
     
     return parser.parse_args()
 
