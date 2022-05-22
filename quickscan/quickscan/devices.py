@@ -351,7 +351,7 @@ class Devices:
                         check_name = os.path.basename(dev.mpath_device)
 
                     if check_name in signatures:
-                        logger.info(f'rejecting {check_name}')
+                        logger.info(f'disk signature detected - rejecting {check_name}')
                         dev.reject_reasons.append(f'{",".join(signatures[check_name])} detected')
 
         logger.info('finished')

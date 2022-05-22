@@ -42,7 +42,7 @@ class ObjectFilter:
                 else:
                     val = getattr(obj, key, None)
                 if val != v:
-                    logger.debug(f'filter result - no match on {k} {val} != {v}')
+                    logger.debug(f'filter result - no match on {k}: {val} != {v}')
                     return False
             else:
                 logger.debug(f'filter key ({k}) not found in the object. Key ignored.')
