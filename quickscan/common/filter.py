@@ -4,7 +4,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class Filter:
+class ObjectFilter:
 
     def __init__(self, kv: str):
         self._kv = kv

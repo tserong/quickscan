@@ -15,7 +15,7 @@ from quickscan.common.utils import (
     get_link_data,
     is_device_locked,
     parse_tags)
-from quickscan.common.filter import Filter
+from quickscan.common.filter import ObjectFilter
 from quickscan.common.concurrent import concurrent_cmds, async_run
 from quickscan.common.enums import ReportFormat
 
@@ -378,15 +378,15 @@ class Devices:
 
         return dev_list
 
-    def as_json(self, filter: Optional[Filter] = None) -> str:
+    def as_json(self, dev_filter: Optional[ObjectFilter] = None) -> str:
         s = ''
         for dev in self._device_data:
-            if filter and not filter.ok(dev):
+            if dev_filter and not dev_filter.ok(dev):
                 continue
             s += f'{dev.as_json()},\n'
         return f'[{s}]' if s else '[]'
 
-    def as_text(self, filter: Optional[Filter] = None) -> str:
+    def as_text(self, dev_filter: Optional[ObjectFilter] = None) -> str:
         if self._skip_analysis:
             headings = BaseDevice._report_headings
         else:
@@ -395,12 +395,12 @@ class Devices:
         output = [headings]
 
         for dev in sorted(self._device_data, key=lambda dev: dev.path):
-            if filter and not filter.ok(dev):
+            if dev_filter and not dev_filter.ok(dev):
                 continue
             output.append(dev.as_text())
 
         if len(output) == 1:
-            sfx = ' that match your filter' if filter else ''
+            sfx = ' that match your filter' if dev_filter else ''
             return f'No devices found{sfx}'
         else:
             dev_count = len(output) - 1
@@ -408,7 +408,7 @@ class Devices:
 
         return '\n'.join(output)
 
-    def report(self, mode: ReportFormat = 'text', filter: Optional[Filter] = None) -> str:
+    def report(self, mode: ReportFormat = 'text', dev_filter: Optional[ObjectFilter] = None) -> str:
         if mode == 'json':
-            return self.as_json(filter)
-        return self.as_text(filter)
+            return self.as_json(dev_filter)
+        return self.as_text(dev_filter)

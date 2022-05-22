@@ -6,7 +6,7 @@ import argparse
 
 from quickscan import Devices
 from quickscan.common.enums import ReportFormat, LogLevel
-from quickscan.common.filter import Filter
+from quickscan.common.filter import ObjectFilter
 import logging
 
 
@@ -25,18 +25,18 @@ def main(args: argparse.Namespace) -> None:
         print('\n'.join(reasons))
         sys.exit(4)
 
-    filter = None
+    dev_filter = None
     if args.filter:
-        filter = Filter(args.filter)
-        if not filter.valid:
+        dev_filter = ObjectFilter(args.filter)
+        if not dev_filter.valid:
             logger.error('invalid filter provided, ignored')
-            filter = None
+            dev_filter = None
 
     logging.info('Starting...')
     start_time = time.time()
     devices = Devices(args.skip_analysis)
     logging.info(f'Completed, runtime: {(time.time() - start_time):.6f}s')
-    print(devices.report(mode=args.format.value, filter=filter))
+    print(devices.report(mode=args.format.value, dev_filter=dev_filter))
 
 
 def get_args() -> argparse.Namespace:
