@@ -35,7 +35,7 @@ async def concurrent_cmds(cmd_list: List[str]) -> List[CompletedProcess]:
     tasks = []
     for cmd in cmd_list:
         tasks.append(run_cmd(cmd))
-    
+
     data = await asyncio.gather(*tasks)
 
     return data

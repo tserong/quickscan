@@ -5,7 +5,7 @@ import time
 import argparse
 
 from quickscan import Devices
-from quickscan.common.enums import ReportFormat,LogLevel
+from quickscan.common.enums import ReportFormat, LogLevel
 from quickscan.common.filter import Filter
 import logging
 
@@ -18,7 +18,7 @@ logging.basicConfig(
 
 
 def main(args: argparse.Namespace) -> None:
-    
+
     ok_to_run, reasons = Devices.can_run()
     if not ok_to_run:
         print('Error: Unable to start')
@@ -29,7 +29,7 @@ def main(args: argparse.Namespace) -> None:
     if args.filter:
         filter = Filter(args.filter)
         if not filter.valid:
-            logger.error(f'invalid filter provided, ignored')
+            logger.error('invalid filter provided, ignored')
             filter = None
 
     logging.info('Starting...')
@@ -38,19 +38,20 @@ def main(args: argparse.Namespace) -> None:
     logging.info(f'Completed, runtime: {(time.time() - start_time):.6f}s')
     print(devices.report(mode=args.format.value, filter=filter))
 
+
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
         '--format',
-        default='json', 
+        default='json',
         type=ReportFormat,
         choices=list(ReportFormat),
         help='report format for the disk inventory')
 
     parser.add_argument(
         '--loglevel',
-        default='debug', 
+        default='debug',
         type=LogLevel,
         choices=list(LogLevel),
         help='log level')
@@ -64,8 +65,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         '--filter',
         type=str,
-        help='filter the devices shown by key/value (e.g. key=value,key=value,...)')        
-    
+        help='filter the devices shown by key/value (e.g. key=value,key=value,...)')
+
     return parser.parse_args()
 
 

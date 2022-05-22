@@ -1,9 +1,7 @@
 import os
 import json
-from re import S
 import string
 import shutil
-import asyncio
 import logging
 
 from glob import glob
@@ -26,13 +24,14 @@ logger = logging.getLogger(__name__)
 # Differences to ceph-volume
 # - don't follow partitions - the presence of partitions makes the device ineligible, anyway
 # - don't try and get an exclusive lock if the device is already rejected
-# - if the device looks empty - inspect the signature with wipefs, to be sure (detects mdraid, btrfs, gpt etc)
+# - if the device looks empty - inspect the signature with wipefs, to be sure (detects mdraid,
+#   btrfs, gpt etc)
 
 
 class BaseDevice:
     _device_attributes = [
-        'removable', 
-        'size', 
+        'removable',
+        'size',
         'ro',
         'device/model',
         'device/vendor',
@@ -70,7 +69,7 @@ class BaseDevice:
 
         self._holders = glob(os.path.join(self._block_dir, self._dev_node, 'holders/*'))
         self.lvs = self._build_lvs()  # must run after _holders is created
-        
+
         self._build()
 
     def _build(self) -> None:
@@ -83,7 +82,7 @@ class BaseDevice:
             if dev in self._parent._mpath_device_map:
                 self.mpath_device = self._parent._mpath_device_map.get(dev)
                 self.mpath_node = dev
-   
+
     def _build_lvs(self) -> List[Dict[str, Any]]:
         lvs = []
         for holder_path in self._holders:
@@ -96,7 +95,7 @@ class BaseDevice:
                 ceph_lv = False
                 if tags_str:
                     tags = parse_tags(tags_str)
-                    for k,v in tags.items():
+                    for k, v in tags.items():
                         if k.startswith('ceph.'):
                             ceph_lv = True
                             k = k[5:]
@@ -114,7 +113,7 @@ class BaseDevice:
     @property
     def scsi_addr(self) -> str:
         scsi_addr_path = glob(f'/sys/block/{self._dev_node}/device/bsg/*')
-        return '' if not scsi_addr_path else os.path.basename(scsi_addr_path[0])        
+        return '' if not scsi_addr_path else os.path.basename(scsi_addr_path[0])
 
     @property
     def device_id(self) -> str:
@@ -125,7 +124,8 @@ class BaseDevice:
 
     @property
     def _dev_nodes_str(self):
-        return (','.join([os.path.basename(self.dev_path), os.path.basename(self.alt_path)])).rstrip(',')
+        return (','.join([os.path.basename(self.dev_path),
+                          os.path.basename(self.alt_path)])).rstrip(',')
 
     @timeit
     def _process_sysfs(self) -> None:
@@ -137,7 +137,9 @@ class BaseDevice:
 
             # post processing
             if key == 'size':
-                logical_size = read_file(os.path.join(self._block_dir, self._dev_node, 'queue/logical_block_size'))
+                logical_size = read_file(os.path.join(self._block_dir,
+                                                      self._dev_node,
+                                                      'queue/logical_block_size'))
                 self.sys_api['sectors'] = int(content)
                 self.sys_api['sectorsize'] = int(logical_size)
                 try:
@@ -164,18 +166,19 @@ class BaseDevice:
             and isinstance(getattr(self, k), (float, int, str, list, dict, tuple))
         }
         return json.dumps(data, indent=2, sort_keys=True)
-    
+
     def as_text(self) -> str:
-         return self._report_template.format(
-                    dev=self.path,
-                    size=self.sys_api['human_readable_size'],
-                    rot=True if self.sys_api['rotational'] == '1' else False,
-                    model=self.sys_api['model'],
-                    dev_nodes=self._dev_nodes_str
-                )
+        return self._report_template.format(
+                dev=self.path,
+                size=self.sys_api['human_readable_size'],
+                rot=True if self.sys_api['rotational'] == '1' else False,
+                model=self.sys_api['model'],
+                dev_nodes=self._dev_nodes_str
+            )
+
 
 class Device(BaseDevice):
-    _report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {available!s:<9}  {model:<25} {dev_nodes:<16} {reject}'
+    _report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {available!s:<9}  {model:<25} {dev_nodes:<16} {reject}'  # noqa: E501
     _report_headings = _report_template.format(
         dev='Device Path',
         size='Size',
@@ -198,7 +201,7 @@ class Device(BaseDevice):
         # Notes
         # 1. maintain this order, since each step can modify the device object attributes
         #    and be referenced in a later check function
-        # 2. keep this analysis quick - anything that needs >20ms should be handled in the 
+        # 2. keep this analysis quick - anything that needs >20ms should be handled in the
         #    parent class analyse phase
         self._check_size()
         self._check_partitions()
@@ -207,7 +210,8 @@ class Device(BaseDevice):
 
     def _check_size(self) -> None:
         if self.sys_api['size'] < self._min_osd_size_bytes:
-            self.reject_reasons.append(f'Device too small (< {human_readable_size(self._min_osd_size_bytes)})')
+            self.reject_reasons.append(
+                f'Device too small (< {human_readable_size(self._min_osd_size_bytes)})')
 
     def _check_partitions(self) -> None:
         dirs = glob(os.path.join(self._block_dir, self._dev_node, f'{self._dev_node}*'))
@@ -223,12 +227,12 @@ class Device(BaseDevice):
         if self.reject_reasons:
             logger.info(f'skipping "lock" check, since {self.dev_path} has already been rejected')
         elif self.mpath_device:
-            logger.info(f'skipping "lock" check for mpath enabled device')
+            logger.info('skipping "lock" check for mpath enabled device')
         else:
             # device could be free, let's confirm by trying to get an EXCL lock
             if is_device_locked(self.dev_path):
                 self.reject_reasons.append('Locked')
-    
+
     def as_text(self) -> str:
         return self._report_template.format(
                 dev=self.path,
@@ -243,8 +247,6 @@ class Device(BaseDevice):
 
 class Devices:
 
-    # report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {available!s:<9}  {model:<25} {dev_nodes:<16} {reject}'
-    # basic_report_template = '{dev:<25} {size:>10}  {rot!s:<7}  {model:<25} {dev_nodes:<16}'
     _dependencies = [
         'lvs',
         'wipefs',
@@ -254,9 +256,13 @@ class Devices:
         self._skip_analysis = skip_analysis
         self._disk_group_size = disk_group_size
         self._candidate_devices = get_block_devs()
-        self._lv_metadata: Dict[str, Dict[str, Any]] = self._build_lv_metadata() 
-        self._pv_devices: List[str] = [tgt for _linkname, tgt in get_link_data('/dev/disk/by-id/lvm-pv-uuid-*')]
-        self._mpath_device_map: Dict[str, str] = {target: link for link, target in get_link_data('/dev/mapper/mpath*')}
+        self._lv_metadata: Dict[str, Dict[str, Any]] = self._build_lv_metadata()
+        self._pv_devices: List[str] = [
+            tgt for _linkname, tgt in get_link_data('/dev/disk/by-id/lvm-pv-uuid-*')
+        ]
+        self._mpath_device_map: Dict[str, str] = {
+            target: link for link, target in get_link_data('/dev/mapper/mpath*')
+        }
         self._lv_device_map = self._build_lv_device_map()
         self._device_data: List[Device] = self._build_devices()
 
@@ -300,7 +306,7 @@ class Devices:
         return map
 
     def analyse(self) -> None:
-        
+
         self._check_signatures()
 
     @timeit
@@ -309,10 +315,10 @@ class Devices:
         if not dev_paths:
             logger.info('all disks are in use, no further analysis needed')
             return
-        
+
         logger.info(f'inspecting disk signatures for {len(dev_paths)} devices: {dev_paths}')
 
-        # Split the disks we need to take a closer look at into groups, then pass to 
+        # Split the disks we need to take a closer look at into groups, then pass to
         # asyncio to get the signatures
         disk_groups = []
         for i in range(0, len(dev_paths), self._disk_group_size):
@@ -339,7 +345,11 @@ class Devices:
                         signatures[dev_name] = {sig['type']}
 
                 for dev in self._device_data:
-                    check_name = dev._dev_node if not dev.mpath_device else os.path.basename(dev.mpath_device)
+                    if not dev.mpath_device:
+                        check_name = dev._dev_node
+                    else:
+                        check_name = os.path.basename(dev.mpath_device)
+
                     if check_name in signatures:
                         logger.info(f'rejecting {check_name}')
                         dev.reject_reasons.append(f'{",".join(signatures[check_name])} detected')
@@ -375,19 +385,18 @@ class Devices:
                 continue
             s += f'{dev.as_json()},\n'
         return f'[{s}]' if s else '[]'
-        
-    def as_text(self, filter:Optional[Filter] = None) -> str:
+
+    def as_text(self, filter: Optional[Filter] = None) -> str:
         if self._skip_analysis:
             headings = BaseDevice._report_headings
         else:
             headings = Device._report_headings
-    
+
         output = [headings]
 
         for dev in sorted(self._device_data, key=lambda dev: dev.path):
             if filter and not filter.ok(dev):
                 continue
-                # device_nodes = ','.join([os.path.basename(device.dev_path), os.path.basename(device.alt_path)])
             output.append(dev.as_text())
 
         if len(output) == 1:
@@ -399,7 +408,7 @@ class Devices:
 
         return '\n'.join(output)
 
-    def report(self, mode: ReportFormat='text', filter: Optional[Filter] = None) -> str:
+    def report(self, mode: ReportFormat = 'text', filter: Optional[Filter] = None) -> str:
         if mode == 'json':
             return self.as_json(filter)
         return self.as_text(filter)

@@ -1,12 +1,12 @@
-from opcode import hasconst
 from typing import Any
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 class Filter:
 
-    def __init__(self, kv:str):
+    def __init__(self, kv: str):
         self._kv = kv
 
         self.filters = {}
@@ -27,7 +27,7 @@ class Filter:
             self.filters[k] = v
 
     def ok(self, obj: Any):
-        for k,v in self.filters.items():
+        for k, v in self.filters.items():
             key = k
             subkey = None
             if '/' in k:
@@ -45,5 +45,5 @@ class Filter:
                     logger.debug(f'filter result - no match on {k} {val} != {v}')
                     return False
             else:
-                logger.debug(f'active filter has key ({k}) not present in the object being checked. Key ignored.')
+                logger.debug(f'filter key ({k}) not found in the object. Key ignored.')
         return True

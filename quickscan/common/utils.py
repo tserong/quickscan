@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Tuple
 import logging
 logger = logging.getLogger(__name__)
 
+
 def timeit(func):
     def wrap(*args, **kwargs):
         start_time = time.time()
@@ -34,12 +35,13 @@ def issue_cmd(cmd: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd.split(' '), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def parse_tags(tags_str:str) -> Dict[str, str]:
+def parse_tags(tags_str: str) -> Dict[str, str]:
     tags = {}
     for tag in tags_str.split(','):
         k, v = tag.split('=')
         tags[k] = v
     return tags
+
 
 @timeit
 def get_lvm_metadata(lvm_cmd: str, lvm_type: str) -> List[Dict[str, Any]]:
@@ -56,12 +58,13 @@ def get_lvm_metadata(lvm_cmd: str, lvm_type: str) -> List[Dict[str, Any]]:
             return []
 
     cmd_name = lvm_cmd.split(' ')[0]
-    logger.warning(f'LVM {cmd_name} command failed with rc={response.returncode}: {str(response.stderr)}')
+    logger.warning(f'LVM {cmd_name} cmd failed rc={response.returncode}:{str(response.stderr)}')
     return []
 
 
 def get_link_data(glob_pattern) -> List[Tuple[str, str]]:
     return [(link, os.path.basename(str(Path(link).resolve()))) for link in glob(glob_pattern)]
+
 
 def read_file(file_name) -> str:
     if os.path.exists(file_name):
@@ -69,7 +72,7 @@ def read_file(file_name) -> str:
             try:
                 return f.read().decode('utf-8', 'ignore').strip()
             except OSError as e:
-                logger.error(f'Error reading {file_name}')
+                logger.error(f'Error reading {file_name}: {str(e)}')
                 return ''
     else:
         return 'unknown'
@@ -89,6 +92,7 @@ def human_readable_size(size):
     return "{size:.2f} {suffix}".format(
         size=size,
         suffix=suffix)
+
 
 @timeit
 def is_device_locked(path: str) -> bool:
