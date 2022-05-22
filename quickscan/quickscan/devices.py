@@ -308,6 +308,7 @@ class Devices:
     def analyse(self) -> None:
 
         self._check_signatures()
+        self._check_multipath()
 
     @timeit
     def _check_signatures(self) -> None:
@@ -355,6 +356,12 @@ class Devices:
                         dev.reject_reasons.append(f'{",".join(signatures[check_name])} detected')
 
         logger.info('finished')
+
+    @timeit
+    def _check_multipath(self) -> None:
+        for dev in self._device_data:
+            if dev.alt_path and not dev.mpath_node:
+                dev.reject_reasons.append('multipath configuration missing')
 
     @timeit
     def _build_devices(self) -> List[Device]:
