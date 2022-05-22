@@ -266,6 +266,14 @@ class Devices:
         self._lv_device_map = self._build_lv_device_map()
         self._device_data: List[Device] = self._build_devices()
 
+        try:
+            # requires python3-libstoragemgmt
+            import lsm  # noqa: F401
+        except ImportError:
+            self.lsm_available = False
+        else:
+            self.lsm_available = True
+
         if not self._skip_analysis:
             self.analyse()
 
