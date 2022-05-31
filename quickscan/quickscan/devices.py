@@ -34,7 +34,9 @@ class BaseDevice:
         'removable',
         'size',
         'ro',
+        'serial',
         'device/model',
+        'device/serial',
         'device/vendor',
         'device/wwid',
         'device/vpd_pg80',
@@ -157,6 +159,9 @@ class BaseDevice:
             elif key == 'vpd_pg80':
                 key = 'serial'
                 content = ''.join([ch for ch in content if ch in string.printable]).strip()
+
+            if key == 'serial' and content == 'unknown':
+                continue
 
             self.sys_api[key] = content
 
