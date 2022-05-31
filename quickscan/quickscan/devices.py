@@ -156,7 +156,7 @@ class BaseDevice:
 
             elif key == 'vpd_pg80':
                 key = 'serial'
-                content = ''.join([ch for ch in content if ch in string.printable])
+                content = ''.join([ch for ch in content if ch in string.printable]).strip()
 
             self.sys_api[key] = content
 
